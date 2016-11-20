@@ -4,134 +4,357 @@ Spyder Editor
 
 This is a temporary script file.
 """
-from decimal import *
+
+# -*- coding: utf-8 -*-
+"""
+Spyder Editor
+This is a temporary script file.
+"""
+from decimal import Decimal
+from decimal import getcontext
 import math
+import sys
+import threading
+import Queue
+import traceback
+import os
+import os.path
+
 getcontext().prec = 6
 
+
+# 定义一些Exception，用于自定义异常处理
+
+class NoResultsPending(Exception):
+    """All works requests have been processed"""
+    pass
+
+
+class NoWorkersAvailable(Exception):
+    """No worket threads available to process remaining requests."""
+    pass
+
+
+def _handle_thread_exception(request, exc_info):
+    """默认的异常处理函数，只是简单的打印"""
+    traceback.print_exception(*exc_info)
+
+
+# calculate formulas
+
 class Formula:
-    aef=""
-    aep=""
-    anf=""
-    anp=""
-    def __init__(self,tuple):
-        aef=tuple[0]
-        aep=tuple[1]
-        anf=tuple[2]
-        anp=tuple[3]
+    def __init__(self, tuple):
+        self.aef = tuple[0]
+        self.aep = tuple[1]
+        self.anf = tuple[2]
+        self.anp = tuple[3]
+
     def calculate(self):
         print ""
+
+
 class Wong2(Formula):
     def calculate(self):
-        susp_score=self.aef-self.aep
+        susp_score = self.aef - self.aep
+        return susp_score
+
 
 class Op2(Formula):
     def calculate(self):
-        susp_score=Decimal(self.aef)-Decimal(self.aep)/Decimal(self.aef+self.anf+1)
+        susp_score = Decimal(self.aef) - Decimal(self.aep) / Decimal(self.aef + self.anf + 1)
         return susp_score
+
 
 class Jaccard(Formula):
     def calculate(self):
-        susp_score=Decimal(self.aef)/Decimal(self.aef+self.aep+self.anf)
+        susp_score = Decimal(self.aef) / Decimal(self.aef + self.aep + self.anf)
         return susp_score
+
 
 class Ochiai(Formula):
     def calculate(self):
-        susp_score=Decimal(self.aef)/Decimal(math.sqrt((self.aef+self.anf)*(self.aef+self.aep)))
+        susp_score = Decimal(self.aef) / Decimal(math.sqrt((self.aef + self.anf) * (self.aef + self.aep)))
         return susp_score
+
 
 class Tarantula(Formula):
     def calculate(self):
-        fz=Decimal(self.aef)/Decimal(self.aef+self.anf)
-        fm=fz+Decimal(self.aep)/Decimal(self.aep+self.anp)
-        susp_score=fz/fm
+        fz = Decimal(self.aef) / Decimal(self.aef + self.anf)
+        fm = fz + Decimal(self.aep) / Decimal(self.aep + self.anp)
+        susp_score = fz / fm
         return susp_score
+
+
 class Ochiai2(Formula):
     def calculate(self):
-        fz=self.aef*self.anp
-        fm=Decimal(math.sqrt((self.aef+self.aep)*(self.anp+self.anf)*(self.aef+self.anf)*(self.aep+self.anp)))
-        susp_score=fz/fm
+        fz = self.aef * self.anp
+        fm = Decimal(
+            math.sqrt((self.aef + self.aep) * (self.anp + self.anf) * (self.aef + self.anf) * (self.aep + self.anp))+1)
+        susp_score = fz / fm
         return susp_score
 
-class CalculateSBFL:
-    version=-1
 
-    # matrix={}   #pass or fail info ,each row is a test case.
-    # suspicious_value={} #store entity's suspicious value
-    # test_case_pof={}    #indicate which case is failed.
-    # pof_tuple={}    #aef,aep,anf,anp
-    # suspicious_value_remain={}  #bias suspiciousness
+###load spectra and matrix,and calculate sus_score.
+class Task:
+    def __init__(self, version, spectra_url, matrix_url):
+        self.version = version
+        self.spectra_url = spectra_url
+        self.matrix_url = matrix_url
 
-    spectra={}  #map every item in matrix to source code line.
 
-    @classmethod
-    def loadSpectra(url):
-        spectra_file = open(url, 'r')
-        for (lineNo, line) in enumerate(spectra_file):
-            CalculateSBFL.spectra[lineNo] = line
+class TestProgram:
+    def __init__(self, version, spectra_url, matrix_url):
+        self.version = version
+        self.spectra = self.loadSpectra(spectra_url)
+        self.matrix = self.loadMatrix(matrix_url)
+        self.caseInfo = self.loadCaseInfo(matrix_url)
+        self.susScore = {}
 
-    def __init__(self,version):
-        self.version=version
+    def loadSpectra(self, url):
+        tmp_dict = {}
+        with open(url, 'r') as Spectras:
+            for (lineNo, spectra) in enumerate(Spectras):
+                tmp_dict[lineNo] = spectra
+        return tmp_dict
 
-    def load(self,url_m):
-        matrix_file=open(url_m,'r')
-        for (case,line) in enumerate(matrix_file):
-            pass_fail_info=line.split(' ')
-            self.test_case_pof[case]=pass_fail_info[-1]
-            self.matrix=pass_fail_info[0:-1]
+    def loadMatrix(self, url):
+        tmp_dict = {}
+        with open(url, 'r') as Matrixs:
+            for (caseNo, raw_case) in enumerate(Matrixs):
+                case = raw_case.split(' ')[0:-1]
+                tmp_dict[caseNo] = case
+        return tmp_dict
 
-        self.pof_tuple=self.genTuple(CalculateSBFL.spectra,self.test_case_pof)
+    def loadCaseInfo(self, url):
+        tmp_dict = {}
+        with open(url, 'r') as CaseInfos:
+            for (caseNo, raw_info) in enumerate(CaseInfos):
+                info = raw_info.split(' ')[-1]
+                tmp_dict[caseNo] = info
+        return tmp_dict
 
-    def genTuple(self,spectra,testInfo):
-        tuples={}
-        for key in spectra.keys():
-            tuples[key]=[0,0,0,0]
-            for ts_key in testInfo.keys:
-                if testInfo[ts_key]=='+':
-                    if spectra[key]=='0':
-                        tuples[key][3]+=1
+    def genTuples(self):
+        print "----generate tuples----"
+        tuples = {}
+        for key in self.spectra.keys():
+            tuples[key] = [0, 0, 0, 0]  # aef,aep,anf,anp
+            for ts_key in self.caseInfo.keys():
+                if self.caseInfo[ts_key].split('\n')[0] == '+':
+                    if self.matrix[ts_key][key] == '0':
+                        tuples[key][3] += 1
                     else:
-                        tuples[key][1]+=1
+                        tuples[key][1] += 1
                 else:
-                    if spectra[key]=='0':
-                        tuples[key][2]+=1
+                    if self.matrix[ts_key] == '0':
+                        tuples[key][2] += 1
                     else:
-                        tuples[key][0]+=1
+                        tuples[key][0] += 1
         return tuples
 
-    def diffTestSuite(self,cbfl):
-        test_case_remain=[]
-        cur_test_case=self.test_case_pof
-        other_test_case=cbfl.test_case_pof
-        for (ct,ot) in zip(cur_test_case.items(),other_test_case.items()):
-            if ct[1]=='-' and ct[0]==ot[0] and ct[1]==ot[1]:
-                continue
-            test_case_remain.append(ot)
-        tmp={}
-        for (key,val) in test_case_remain:
-            tmp[key]=val
+    def calculateSusScore(self, tuples):
+        print "----calculate suspicious scores----"
+        tmp_dict = {}
+        for (key,tuple) in tuples.items():
+            tmp_dict[key] = self.calculate(tuple)
+        self.susScore = tmp_dict
 
-        remainTuples=self.genTuple(CalculateSBFL.spectra,tmp)
-        sus_value={}
-        for (k,v) in remainTuples:
-            sus_value[k]=self.calculate(v)
-        self.suspicious_value_remain[cbfl.version]=sus_value
+    def calculate(self, tuple):
+        print "----in calculate----" + str(tuple[0]) + " " + str(tuple[1]) + " " + str(tuple[2]) + " " + str(tuple[3])
+        wong2 = Wong2(tuple)
+        op2 = Op2(tuple)
+        jaccard = Jaccard(tuple)
+        ochiai = Ochiai(tuple)
+        taran = Tarantula(tuple)
+        ochiai2 = Ochiai2(tuple)
+        formulas = {}
+        formulas["Wong2"] = wong2
+        formulas["Op2"] = op2
+        formulas["Jaccard"] = jaccard
+        formulas["Ochiai"] = ochiai
+        formulas["Tarantula"] = taran
+        formulas["Ochiai2"] = ochiai2
 
-    def calculate(self,tuple):
-        wong=Wong2(tuple)
-        op2=Op2(tuple)
-        jaccard=Jaccard(tuple)
-        ochiai=Ochiai(tuple)
-        taran=Tarantula(tuple)
-        ochiai2=Ochiai2(tuple)
-        formulas={}
-        formulas["Wong2"]=wong
-        formulas["Op2"]=op2
-        formulas["Jaccard"]=jaccard
-        formulas["Ochiai"]=ochiai
-        formulas["Tarantula"]=taran
-        formulas["Ochiai2"]=ochiai2
-
-        results={}
-        for (key,val) in formulas.items():
-            results[key]=val.calculate()
+        results = {}
+        print "----before calculate----"
+        for (key, val) in formulas.items():
+            results[key] = val.calculate()
+            print "the sus value is " + str(results[key])
         return results
+
+    def saveToFile(self, url):
+        print "open file to save the result:" + str(url)
+        print self.susScore
+        with open(url, "a") as sFile:
+            for (key, value) in self.susScore.items():
+                sFile.write("version :"+self.version+" key:" + str(key) + " suspicious value is:" + str(value) + "\n")
+
+
+###using threadpool, taskqueue, resultqueue to increase the processing velocity.
+class WorkThread(threading.Thread):
+    """后台线程，真正的工作线程，从请求队列(requestQueue)中获取TestProgram info，build TestProgram object并将执行后的结果添加到结果队列(resultQueue)"""
+
+    def __init__(self, taskQueue, resultQueue, poll_timeout=5, **kwds):
+        threading.Thread.__init__(self, **kwds)
+        self.setDaemon(True)
+        self._taskQueue = taskQueue
+        self._resultQueue = resultQueue
+        self._poll_timeout = poll_timeout
+        self._dismiss = threading.Event()
+        self.start()
+
+    def run(self):
+        '''每个线程尽可能多的执行work，所以采用loop，只要线程可用，并且tasktQueue有work未完成，则一直loop'''
+        while True:
+            if self._dismiss.is_set():
+                break
+            task = None
+            try:
+                task = self._taskQueue.get(True, self._poll_timeout)
+                print "----get task----:" + str(task.version)
+            except Queue.Empty:
+                continue
+            else:
+                '''之所以在这里再次判断dimissed，是因为之前的timeout时间里，很有可能，该线程被dismiss掉了'''
+                if self._dismiss.is_set():
+                    self._taskQueue.put(task)
+                    break
+                print "----processing the data----"
+                tp = TestProgram(task.version, task.spectra_url, task.matrix_url)
+                tuples = tp.genTuples()
+                tp.calculateSusScore(tuples)
+                try:
+                    self._resultQueue.put((task, tp))
+                except:
+                    '''异常处理'''
+                    print "----processing data error"
+                    task.exception = True
+                    errorTP = TestProgram(task.version, task.spectra_url, task.matrix_url)
+                    errorTP.susScore["error"] = sys.exc_info()
+                    self._resultQueue.put((task, errorTP))
+
+    def dismiss(self):
+        '''设置一个标志，表示完成当前work之后，退出'''
+        self._dismiss.set()
+
+
+class ThreadPool:
+    def __init__(self, num_workers, t_size=0, r_size=0, poll_timeout=5):
+        self._taskQueue = Queue.Queue(t_size)
+        self._resultQueue = Queue.Queue(r_size)
+        self.workers = []
+        self.dismissedWorkers = []
+        self.workTasks = {}
+        self.createWorkers(num_workers, poll_timeout)
+
+    def createWorkers(self, num_workers, poll_timeout=5):
+        for i in range(num_workers):
+            self.workers.append(WorkThread(self._taskQueue, self._resultQueue, poll_timeout=poll_timeout))
+
+    def dismissWorkers(self, num_workers, do_join=False):
+        dismiss_list = []
+        for i in range(min(num_workers, len(self.workers))):
+            worker = self.workers.pop()
+            worker.dismiss()
+            dismiss_list.append(worker)
+        if do_join:
+            for worker in dismiss_list:
+                worker.join()
+        else:
+            self.dismissedWorkers.extend(dismiss_list)
+
+    def joinAllDismissedWorkers(self):
+        '''join 所有停用的thread'''
+        # print len(self.dismissedWorkers)
+        for worker in self.dismissedWorkers:
+            worker.join()
+        self.dismissedWorkers = []
+
+    def putTask(self, task, block=True, timeout=5):
+        print "----put task----"
+        assert isinstance(task, Task)
+        '''当queue满了，也就是容量达到了前面设定的q_size,它将一直阻塞，直到有空余位置，或是timeout'''
+        self._taskQueue.put(task, block, timeout)
+        self.workTasks[task.version] = task
+
+    def poll(self, save_url, block=False):
+        print "----poll----"
+        while True:
+            if not self.workTasks:
+                raise NoResultsPending
+            elif block and not self.workers:
+                raise NoWorkersAvailable
+            try:
+                '''默认只要resultQueue有值，则取出，否则一直block'''
+                task, result = self._resultQueue.get(block=block)
+                print task, result
+                result.saveToFile(save_url)
+                return result
+            except Queue.Empty:
+                break
+
+    def wait(self):
+        while True:
+            try:
+                self.poll(True)
+            except NoResultsPending:
+                break
+
+    def workersize(self):
+        return len(self.workers)
+
+    def stop(self):
+        '''join 所有的thread,确保所有的线程都执行完毕'''
+        self.dismissWorkers(self.workersize(), True)
+        self.joinAllDismissedWorkers()
+
+
+class TaskProducer:
+    def __init__(self, url, threadPool):
+        self.url = url
+        self.threadPool = threadPool
+
+    def genTask(self, spectra_name, matrix_name):
+        counter=0
+        print "----generate task----"
+        for parent, dirnames, filenames in os.walk(self.url):
+            for dirname in dirnames:
+                print "task's url is " + str(os.path.join(parent, dirname, spectra_name)) + "\n"
+                task = Task(dirname, os.path.join(parent, dirname, spectra_name),
+                            os.path.join(parent, dirname, matrix_name))
+                self.threadPool.putTask(task)
+                counter+=1
+        return counter
+
+
+def calculateY(result_queue,stop):
+    for i in range(2,stop):
+        
+        for j in range(1,i):
+            for tp in result_queue:
+                if tp.version==j:
+                    pass
+                    break;
+                else:
+                    continue
+
+import time
+
+if __name__ == "__main__":
+    #    if len(sys.argv)!=1:
+    #        print "input arguments' number is error."
+    #        return
+    tpool = ThreadPool(9, 200, 300, 5)
+    tproducer = TaskProducer('/home/yanlf/Desktop/workspace/gzoltars/Chart', tpool)
+    pd_counter=tproducer.genTask('spectra', 'matrix')
+
+    # sbfl_result=[]
+    #
+    # while True:
+    #     try:
+    #         time.sleep(0.5)
+    #         sbfl_result.append(tpool.poll('/home/yanlf/Desktop/workspace/result.txt',True))
+    #     except NoResultsPending:
+    #         print "no pending results"
+    #         break
+    tpool.stop()
+    print "Stop"
