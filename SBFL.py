@@ -109,6 +109,7 @@ class TestProgram:
         self.matrix = self.loadMatrix(matrix_url)
         self.caseInfo = self.loadCaseInfo(matrix_url)
         self.susScore = {}
+        self.bias={}
 
     def loadSpectra(self, url):
         tmp_dict = {}
@@ -286,9 +287,8 @@ class ThreadPool:
             try:
                 '''默认只要resultQueue有值，则取出，否则一直block'''
                 task, result = self._resultQueue.get(block=block)
-                print task, result
                 result.saveToFile(save_url)
-                return result
+                return (task,result)
             except Queue.Empty:
                 break
 
@@ -328,14 +328,33 @@ class TaskProducer:
 
 def calculateY(result_queue,stop):
     for i in range(2,stop):
-        
+        cur=result_queue[i-1][1].susScore
+        bias={}
         for j in range(1,i):
-            for tp in result_queue:
-                if tp.version==j:
-                    pass
-                    break;
-                else:
-                    continue
+            iter=result_queue[j-1][1].susScore
+            for key in iter.keys():
+                bias[key]={}
+                for (k,v) in iter[key].items():
+                    if k in bias[key].keys():
+                        bias[key][k]+=v
+                    else:
+                        bias[key][k]=v
+        for key in bias.keys():
+            for k in bias[key].keys():
+                bias[key][k]= bias[key][k]/(i-1)
+
+        result_queue[i-1][1].bias=bias
+
+def finalStep(result_queue):
+    for (kr,vr) in result_queue:
+        cur=vr.susScore
+        for (kc,vc) in cur.items():
+            for (kf,vf) in vc.items():
+                if kc in vr.bias.keys():
+                    cur[kc][kf]=vf-vr.bias[kc][kf]
+
+
+
 
 import time
 
@@ -347,14 +366,20 @@ if __name__ == "__main__":
     tproducer = TaskProducer('/home/yanlf/Desktop/workspace/gzoltars/Chart', tpool)
     pd_counter=tproducer.genTask('spectra', 'matrix')
 
-    # sbfl_result=[]
-    #
-    # while True:
-    #     try:
-    #         time.sleep(0.5)
-    #         sbfl_result.append(tpool.poll('/home/yanlf/Desktop/workspace/result.txt',True))
-    #     except NoResultsPending:
-    #         print "no pending results"
-    #         break
+    sbfl_result=[]
+
+    while True:
+        if len(sbfl_result)==25:
+            break
+        try:
+            time.sleep(0.5)
+            sbfl_result.append(tpool.poll('/home/yanlf/Desktop/workspace/result.txt',True))
+        except NoResultsPending:
+            print "no pending results"
+            break
+    sbfl_result.sort(lambda x,y:cmp(x[0].version,y[0].version))
+    calculateY(sbfl_result,26)
+    finalStep(sbfl_result)
+
     tpool.stop()
     print "Stop"
