@@ -184,10 +184,19 @@ class TestProgram:
 
     def saveToFile(self, url):
         print "open file to save the result:" + str(url)
-        print self.susScore
-        with open(url, "a") as sFile:
+        #print self.susScore
+        cur_parent=os.path.join(url,self.version)
+        if not os.path.exists(cur_parent):
+            os.makedirs(cur_parent)
+        cur_path=os.path.join(cur_parent,"result_original.txt")
+        with open(cur_path,"w+") as sFile:
+            sFile.truncate()
+        with open(cur_path, "a") as sFile:
             for (key, value) in self.susScore.items():
-                sFile.write("version :"+self.version+" key:" + str(key) + " suspicious value is:" + str(value) + "\n")
+                outputStr = str(key)
+                for (kf, vf) in value.items():
+                    outputStr += "," + str(kf) + "#" + str(vf)
+                sFile.write(outputStr + "\n")
 
 
 ###using threadpool, taskqueue, resultqueue to increase the processing velocity.
@@ -327,11 +336,11 @@ class TaskProducer:
 
 
 def calculateY(result_queue,stop):
-    for i in range(2,stop):
-        cur=result_queue[i-1][1].susScore
+    for i in range(1,stop):
+        cur=result_queue[i][1].susScore
         bias={}
-        for j in range(1,i):
-            iter=result_queue[j-1][1].susScore
+        for j in range(i):
+            iter=result_queue[j][1].susScore
             for key in iter.keys():
                 bias[key]={}
                 for (k,v) in iter[key].items():
@@ -341,9 +350,9 @@ def calculateY(result_queue,stop):
                         bias[key][k]=v
         for key in bias.keys():
             for k in bias[key].keys():
-                bias[key][k]= bias[key][k]/(i-1)
+                bias[key][k]= bias[key][k]/(i)
 
-        result_queue[i-1][1].bias=bias
+        result_queue[i][1].bias=bias
 
 def finalStep(result_queue):
     for (kr,vr) in result_queue:
@@ -354,32 +363,53 @@ def finalStep(result_queue):
                     cur[kc][kf]=vf-vr.bias[kc][kf]
 
 
-
+def writeResult2File(result_queue,path):
+    for (kr,vr) in result_queue:
+        cur_version=kr.version
+        cur_parent=os.path.join(path,cur_version)
+        if not os.path.exists(cur_parent):
+            os.makedirs(cur_parent)
+        cur_path=os.path.join(cur_parent,"result.txt")
+        print cur_path
+        with open(cur_path, 'w+') as file:
+            file.truncate()
+        with open(cur_path,'a') as file:
+            for (kc,vc) in vr.susScore.items():
+                outputStr=str(kc)
+                for (kf,vf) in vc.items():
+                    outputStr+=","+str(kf)+"#"+str(vf)
+                file.write(outputStr+"\n")
 
 import time
 
 if __name__ == "__main__":
-    #    if len(sys.argv)!=1:
-    #        print "input arguments' number is error."
-    #        return
-    tpool = ThreadPool(9, 200, 300, 5)
-    tproducer = TaskProducer('/home/yanlf/Desktop/workspace/gzoltars/Chart', tpool)
-    pd_counter=tproducer.genTask('spectra', 'matrix')
+    if len(sys.argv)!=5:
+        print "input arguments number is error.example python SBFL.py project_path tmp_result_path result_path"
+    else:
+        project_path=sys.argv[2]
+        tmp_result_path=sys.argv[3]
+        result_path=sys.argv[4]
 
-    sbfl_result=[]
 
-    while True:
-        if len(sbfl_result)==25:
-            break
-        try:
-            time.sleep(0.5)
-            sbfl_result.append(tpool.poll('/home/yanlf/Desktop/workspace/result.txt',True))
-        except NoResultsPending:
-            print "no pending results"
-            break
-    sbfl_result.sort(lambda x,y:cmp(x[0].version,y[0].version))
-    calculateY(sbfl_result,26)
-    finalStep(sbfl_result)
+        tpool = ThreadPool(9, 200, 300, 5)
+        tproducer = TaskProducer(project_path, tpool)
+        pd_counter=tproducer.genTask('spectra', 'matrix')
 
-    tpool.stop()
-    print "Stop"
+        sbfl_result=[]
+
+        while True:
+            if len(sbfl_result)==pd_counter:
+                break
+            try:
+                time.sleep(0.5)
+                sbfl_result.append(tpool.poll(tmp_result_path,True))
+            except NoResultsPending:
+                print "no pending results"
+                break
+
+        sbfl_result.sort(lambda x,y:cmp(x[0].version,y[0].version))
+        calculateY(sbfl_result,pd_counter)
+        finalStep(sbfl_result)
+        writeResult2File(sbfl_result,result_path)
+        tpool.stop()
+        print "Stop"
