@@ -116,7 +116,7 @@ class TestProgram:
         tmp_dict = {}
         with open(url, 'r') as Spectras:
             for (lineNo, spectra) in enumerate(Spectras):
-                tmp_dict[lineNo] = spectra
+                tmp_dict[lineNo] = spectra.rstrip()
         return tmp_dict
 
     def loadMatrix(self, url):
@@ -139,18 +139,18 @@ class TestProgram:
         print "----generate tuples----\n"
         tuples = {}
         for key in self.spectra.keys():
-            tuples[key] = [0, 0, 0, 0]  # aef,aep,anf,anp
+            tuples[self.spectra[key]] = [0, 0, 0, 0]  # aef,aep,anf,anp
             for ts_key in self.caseInfo.keys():
                 if self.caseInfo[ts_key].split('\n')[0] == '+':
                     if self.matrix[ts_key][key] == '0':
-                        tuples[key][3] += 1
+                        tuples[self.spectra[key]][3] += 1
                     else:
-                        tuples[key][1] += 1
+                        tuples[self.spectra[key]][1] += 1
                 else:
                     if self.matrix[ts_key] == '0':
-                        tuples[key][2] += 1
+                        tuples[self.spectra[key]][2] += 1
                     else:
-                        tuples[key][0] += 1
+                        tuples[self.spectra[key]][0] += 1
         return tuples
 
     def calculateSusScore(self, tuples):
@@ -204,127 +204,6 @@ class TestProgram:
                 sFile.write(outputStr + "\n")
 
 
-###using threadpool, taskqueue, resultqueue to increase the processing velocity.
-# class WorkThread(threading.Thread):
-#     """后台线程，真正的工作线程，从请求队列(requestQueue)中获取TestProgram info，build TestProgram object并将执行后的结果添加到结果队列(resultQueue)"""
-#
-#     def __init__(self, taskQueue, resultQueue, poll_timeout=5, **kwds):
-#         threading.Thread.__init__(self, **kwds)
-#         self.setDaemon(True)
-#         self._taskQueue = taskQueue
-#         self._resultQueue = resultQueue
-#         self._poll_timeout = poll_timeout
-#         self._dismiss = threading.Event()
-#         self.start()
-#
-#     def run(self):
-#         '''每个线程尽可能多的执行work，所以采用loop，只要线程可用，并且tasktQueue有work未完成，则一直loop'''
-#         while True:
-#             if self._dismiss.is_set():
-#                 break
-#             task = None
-#             try:
-#                 task = self._taskQueue.get(True, self._poll_timeout)
-#                 print "----get task----:" + str(task.version)+"\n"
-#             except Queue.Empty:
-#                 time.sleep(1)
-#                 continue
-#             else:
-#                 '''之所以在这里再次判断dimissed，是因为之前的timeout时间里，很有可能，该线程被dismiss掉了'''
-#                 if self._dismiss.is_set():
-#                     self._taskQueue.put(task)
-#                     break
-#                 print "----processing the data----\n"
-#                 try:
-#                     tp = TestProgram(task.version, task.spectra_url, task.matrix_url)
-#                     tuples = tp.genTuples()
-#                     tp.calculateSusScore(tuples)
-#                     self._resultQueue.put((task, tp))
-#                 except:
-#                     '''异常处理'''
-#                     print "----processing data error----\n"
-#                     task.exception = True
-#                     errorTP = TestProgram(task.version, task.spectra_url, task.matrix_url)
-#                     errorTP.susScore["error"] = sys.exc_info()
-#                     self._resultQueue.put((task, errorTP))
-#
-#     def dismiss(self):
-#         '''设置一个标志，表示完成当前work之后，退出'''
-#         self._dismiss.set()
-
-#
-# class ThreadPool:
-#     def __init__(self, num_workers, t_size=0, r_size=0, poll_timeout=5):
-#         self._taskQueue = Queue.Queue(t_size)
-#         self._resultQueue = Queue.Queue(r_size)
-#         self._fixResultQueue= Queue.Queue(r_size)
-#         self.workers = []
-#         self.dismissedWorkers = []
-#         self.workTasks = {}
-#         self.createWorkers(num_workers, poll_timeout)
-#
-#     def createWorkers(self, num_workers, poll_timeout=5):
-#         for i in range(num_workers):
-#             self.workers.append(WorkThread(self._taskQueue, self._resultQueue, poll_timeout=poll_timeout))
-#
-#     def dismissWorkersOfNum(self, num_workers, do_join=False):
-#         dismiss_list = []
-#         for i in range(min(num_workers, len(self.workers))):
-#             worker = self.workers.pop()
-#             worker.dismiss()
-#             dismiss_list.append(worker)
-#         if do_join:
-#             for worker in dismiss_list:
-#                 worker.join()
-#         else:
-#             self.dismissedWorkers.extend(dismiss_list)
-#
-#     def joinAllDismissedWorkers(self):
-#         '''join 所有停用的thread'''
-#         # print len(self.dismissedWorkers)
-#         for worker in self.dismissedWorkers:
-#             worker.join()
-#         self.dismissedWorkers = []
-#
-#     def putTask(self, task, block=True, timeout=5):
-#         print "----put task----\n"
-#         assert isinstance(task, Task)
-#         '''当queue满了，也就是容量达到了前面设定的q_size,它将一直阻塞，直到有空余位置，或是timeout'''
-#         self._taskQueue.put(task, block, timeout)
-#         self.workTasks[task.version] = task
-#
-#     def poll(self, save_url, block=False):
-#         print "----poll----\n"
-#         while True:
-#             if not self.workTasks:
-#                 raise NoResultsPending
-#             elif block and not self.workers:
-#                 raise NoWorkersAvailable
-#             try:
-#                 '''默认只要resultQueue有值，则取出，否则一直block'''
-#                 task, result = self._resultQueue.get(block=block)
-#                 if task.exception:
-#                     print str(task.version)+" task has been encountered error.\n"
-#                 result.saveToFile(save_url)
-#                 del self.workTasks[task.version]
-#                 self._fixResultQueue.put((task,result))
-#             except Queue.Empty:
-#                 break
-#
-#     def wait(self):
-#         while True:
-#             try:
-#                 self.poll(True)
-#             except NoResultsPending:
-#                 break
-#
-#     def workersize(self):
-#         return len(self.workers)
-#
-#     def stop(self):
-#         '''join 所有的thread,确保所有的线程都执行完毕'''
-#         self.dismissWorkers(self.workersize(), True)
-#         self.joinAllDismissedWorkers()
 
 
 class TaskProducer:
@@ -412,12 +291,12 @@ def writeResult2File(result_queue,path):
 import time
 
 if __name__ == "__main__":
-    if len(sys.argv)!=2:
+    if len(sys.argv)!=4:
         print "input arguments number is error.example python SBFL.py project_path tmp_result_path result_path\n"
     else:
         project_path=sys.argv[1]
-        tmp_result_path=sys.argv[1]
-        result_path=sys.argv[1]
+        tmp_result_path=sys.argv[2]
+        result_path=sys.argv[3]
 
 
         #tpool = ThreadPool(4, 200, 300, 5)
@@ -432,7 +311,7 @@ if __name__ == "__main__":
             tp.saveToFile(tmp_result_path)
             sbfl_result.append((task,tp))
 
-        #sbfl_result.sort(lambda x,y:cmp(x[0].version,y[0].version))
+        sbfl_result.sort(lambda x,y:cmp(x[0].version,y[0].version))
 
         calculateY(sbfl_result,pd_counter)
         finalStep(sbfl_result,result_path)
